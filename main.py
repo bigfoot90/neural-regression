@@ -1,6 +1,7 @@
 import math
 import random
 import matplotlib.pyplot as plt
+import matplotlib.widgets as widgets
 import torch
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
@@ -327,3 +328,280 @@ print(f"MSE (X coordinate): {mse_x:.6f}")
 print(f"MSE (Y coordinate): {mse_y:.6f}")
 print(f"Average MSE: {total_mse:.6f}")
 print(f"Mean Euclidean Distance: {mean_distance:.6f}")
+
+
+def create_dynamic_neuron_visualization(model, device, normalize_input):
+    """
+    Crea una visualizzazione dinamica delle attivazioni dei neuroni con slider interattivo
+    """
+    model.eval()
+    
+    # Configurazione della figura
+    fig = plt.figure(figsize=(12, 8))
+    
+    # Calcola il numero di layer per determinare il layout
+    with torch.no_grad():
+        dummy_input = torch.tensor([0.0], dtype=torch.float32).to(device)
+        dummy_activations = model.get_activations(dummy_input)
+        num_layers = len(dummy_activations)
+    
+    # Crea i subplot per ogni layer
+    axes = []
+    for i in range(num_layers):
+        ax = plt.subplot(num_layers, 1, i + 1)
+        axes.append(ax)
+    
+    # Spazio per lo slider
+    plt.subplots_adjust(bottom=0.15)
+    
+    # Crea lo slider
+    slider_ax = plt.axes([0.2, 0.05, 0.6, 0.03])
+    angle_slider = widgets.Slider(
+        slider_ax, 
+        'Angolo (°)', 
+        0, 360, 
+        valinit=0, 
+        valstep=1,
+        valfmt='%d°'
+    )
+    
+    # Inizializza i grafici a barre
+    bars = []
+    for i in range(num_layers):
+        # Calcola le attivazioni iniziali
+        with torch.no_grad():
+            normalized_input = normalize_input(0)
+            input_tensor = torch.tensor([normalized_input], dtype=torch.float32).to(device)
+            activations = model.get_activations(input_tensor)
+        
+        # Crea i grafici a barre iniziali
+        layer_activations = activations[i].flatten()
+        bar = axes[i].bar(range(len(layer_activations)), layer_activations, alpha=0.7)
+        bars.append(bar)
+        
+        # Configurazione degli assi
+        axes[i].set_title(f'Attivazioni Layer {i+1}')
+        axes[i].set_xlabel('Indice Neurone')
+        axes[i].set_ylabel('Valore Attivazione')
+        axes[i].grid(True, alpha=0.3)
+    
+    # Funzione di aggiornamento per lo slider
+    def update_visualization(val):
+        angle = int(angle_slider.val)
+        
+        with torch.no_grad():
+            normalized_input = normalize_input(angle)
+            input_tensor = torch.tensor([normalized_input], dtype=torch.float32).to(device)
+            activations = model.get_activations(input_tensor)
+        
+        # Aggiorna ogni layer
+        for i, layer_activations in enumerate(activations):
+            layer_vals = layer_activations.flatten()
+            
+            # Aggiorna le altezze delle barre
+            for bar, height in zip(bars[i], layer_vals):
+                bar.set_height(height)
+            
+            # Aggiorna i limiti dell'asse Y per una migliore visualizzazione
+            if len(layer_vals) > 0:
+                y_min = min(0, float(layer_vals.min()) * 1.1)
+                y_max = float(layer_vals.max()) * 1.1
+                axes[i].set_ylim(y_min, y_max)
+        
+        # Aggiorna il titolo principale con l'angolo corrente
+        fig.suptitle(f'Attivazioni Neuroni - Angolo: {angle}°', fontsize=14, fontweight='bold')
+        
+        # Ridisegna la figura
+        fig.canvas.draw()
+    
+    # Collega la funzione di aggiornamento allo slider
+    angle_slider.on_changed(update_visualization)
+    
+    # Aggiornamento iniziale
+    update_visualization(0)
+    
+    # Aggiungi istruzioni per l'utente
+    plt.figtext(0.5, 0.02, 'Usa lo slider per cambiare l\'angolo di input (0-360°)', 
+                ha='center', va='bottom', fontsize=10, style='italic')
+    
+    plt.show()
+    
+    return fig, angle_slider
+
+fig, slider = create_dynamic_neuron_visualization(model, device, normalize_input)
+
+# Versione alternativa con widget più avanzati
+def create_advanced_dynamic_visualization(model, device, normalize_input):
+    """
+    Versione avanzata con controlli aggiuntivi
+    """
+    model.eval()
+    
+    # Configurazione della figura
+    fig = plt.figure(figsize=(14, 10))
+    
+    # Calcola il numero di layer
+    with torch.no_grad():
+        dummy_input = torch.tensor([0.0], dtype=torch.float32).to(device)
+        dummy_activations = model.get_activations(dummy_input)
+        num_layers = len(dummy_activations)
+    
+    # Layout più sofisticato
+    gs = fig.add_gridspec(num_layers, 2, width_ratios=[3, 1], hspace=0.3)
+    
+    # Subplot per le attivazioni
+    axes = []
+    for i in range(num_layers):
+        ax = fig.add_subplot(gs[i, 0])
+        axes.append(ax)
+    
+    # Subplot per statistiche aggregate
+    stats_ax = fig.add_subplot(gs[:, 1])
+    
+    # Spazio per i controlli
+    plt.subplots_adjust(bottom=0.2)
+    
+    # Slider per l'angolo
+    slider_ax = plt.axes([0.1, 0.08, 0.5, 0.03])
+    angle_slider = widgets.Slider(
+        slider_ax, 'Angolo (°)', 0, 360, valinit=0, valstep=1, valfmt='%d°'
+    )
+    
+    # Bottone per animazione automatica
+    button_ax = plt.axes([0.65, 0.08, 0.1, 0.04])
+    animate_button = widgets.Button(button_ax, 'Anima')
+    
+    # Checkbox per mostrare valori
+    check_ax = plt.axes([0.65, 0.03, 0.15, 0.04])
+    show_values_check = widgets.CheckButtons(check_ax, ['Mostra Valori'], [False])
+    
+    # Variabili per l'animazione
+    animation_active = False
+    animation_direction = 1
+    
+    # Inizializza i grafici
+    bars = []
+    value_texts = []
+    
+    for i in range(num_layers):
+        with torch.no_grad():
+            normalized_input = normalize_input(0)
+            input_tensor = torch.tensor([normalized_input], dtype=torch.float32).to(device)
+            activations = model.get_activations(input_tensor)
+        
+        layer_activations = activations[i].flatten()
+        bar = axes[i].bar(range(len(layer_activations)), layer_activations, alpha=0.7)
+        bars.append(bar)
+        
+        # Testi per i valori
+        texts = []
+        for j, val in enumerate(layer_activations):
+            text = axes[i].text(j, val, f'{val:.2f}', ha='center', va='bottom', 
+                              fontsize=8, visible=False)
+            texts.append(text)
+        value_texts.append(texts)
+        
+        axes[i].set_title(f'Layer {i+1}')
+        axes[i].set_xlabel('Neurone')
+        axes[i].set_ylabel('Attivazione')
+        axes[i].grid(True, alpha=0.3)
+    
+    # Inizializza il grafico delle statistiche
+    stats_ax.set_title('Statistiche Aggregate')
+    stats_ax.set_xlabel('Layer')
+    stats_ax.set_ylabel('Valore')
+    
+    def update_visualization(val):
+        angle = int(angle_slider.val)
+        
+        with torch.no_grad():
+            normalized_input = normalize_input(angle)
+            input_tensor = torch.tensor([normalized_input], dtype=torch.float32).to(device)
+            activations = model.get_activations(input_tensor)
+        
+        # Statistiche per il grafico aggregato
+        layer_means = []
+        layer_maxs = []
+        layer_stds = []
+        
+        for i, layer_activations in enumerate(activations):
+            layer_vals = layer_activations.flatten()
+            
+            # Aggiorna le barre
+            for bar, height in zip(bars[i], layer_vals):
+                bar.set_height(height)
+            
+            # Aggiorna i testi dei valori
+            show_vals = show_values_check.get_status()[0]
+            for text, val in zip(value_texts[i], layer_vals):
+                text.set_text(f'{val:.2f}')
+                text.set_position((text.get_position()[0], val))
+                text.set_visible(show_vals)
+            
+            # Aggiorna limiti Y
+            if len(layer_vals) > 0:
+                y_min = min(0, float(layer_vals.min()) * 1.1)
+                y_max = float(layer_vals.max()) * 1.1
+                axes[i].set_ylim(y_min, y_max)
+            
+            # Calcola statistiche
+            layer_means.append(float(layer_vals.mean()))
+            layer_maxs.append(float(layer_vals.max()))
+            layer_stds.append(float(layer_vals.std()))
+        
+        # Aggiorna grafico statistiche
+        stats_ax.clear()
+        x_pos = range(1, num_layers + 1)
+        stats_ax.plot(x_pos, layer_means, 'o-', label='Media', linewidth=2)
+        stats_ax.plot(x_pos, layer_maxs, 's-', label='Massimo', linewidth=2)
+        stats_ax.plot(x_pos, layer_stds, '^-', label='Std Dev', linewidth=2)
+        stats_ax.set_title('Statistiche per Layer')
+        stats_ax.set_xlabel('Layer')
+        stats_ax.set_ylabel('Valore')
+        stats_ax.legend()
+        stats_ax.grid(True, alpha=0.3)
+        
+        fig.suptitle(f'Attivazioni Neuroni - Angolo: {angle}°', fontsize=16, fontweight='bold')
+        fig.canvas.draw()
+    
+    def animate(_):
+        nonlocal animation_active, animation_direction
+        animation_active = not animation_active
+        
+        if animation_active:
+            animate_button.label.set_text('Stop')
+            
+            def animate_step():
+                if animation_active:
+                    current_val = angle_slider.val
+                    new_val = current_val + animation_direction * 2
+                    
+                    if new_val >= 360:
+                        new_val = 360
+                        animation_direction = -1
+                    elif new_val <= 0:
+                        new_val = 0
+                        animation_direction = 1
+                    
+                    angle_slider.set_val(new_val)
+                    fig.canvas.draw_idle()
+                    
+                    # Programma il prossimo step
+                    fig.canvas.start_event_loop(0.05)  # 50ms delay
+                    if animation_active:
+                        fig.after_idle(animate_step)
+            
+            animate_step()
+        else:
+            animate_button.label.set_text('Anima')
+    
+    # Collega gli eventi
+    angle_slider.on_changed(update_visualization)
+    animate_button.on_clicked(animate)
+    show_values_check.on_clicked(lambda x: update_visualization(angle_slider.val))
+    
+    # Aggiornamento iniziale
+    update_visualization(0)
+    
+    plt.show()
+    return fig, angle_slider, animate_button, show_values_check
