@@ -341,8 +341,8 @@ def create_dynamic_neuron_visualization(model, device, normalize_input):
     """
     model.eval()
     
-    # Configurazione della figura
-    fig = plt.figure(figsize=(12, 8))
+    # Configurazione della figura con layout a due colonne
+    fig = plt.figure(figsize=(16, 10))
     
     # Calcola il numero di layer per determinare il layout
     with torch.no_grad():
@@ -350,11 +350,17 @@ def create_dynamic_neuron_visualization(model, device, normalize_input):
         dummy_activations = model.get_activations(dummy_input)
         num_layers = len(dummy_activations)
     
-    # Crea i subplot per ogni layer
+    # Layout a griglia: attivazioni a sinistra, output cartesiano a destra
+    gs = fig.add_gridspec(max(num_layers, 2), 2, width_ratios=[2, 1], hspace=0.3, wspace=0.3)
+    
+    # Crea i subplot per ogni layer (colonna sinistra)
     axes = []
     for i in range(num_layers):
-        ax = plt.subplot(num_layers, 1, i + 1)
+        ax = fig.add_subplot(gs[i, 0])
         axes.append(ax)
+    
+    # Subplot per il grafico cartesiano (colonna destra, occupa tutto lo spazio verticale)
+    cartesian_ax = fig.add_subplot(gs[:, 1])
     
     # Spazio per lo slider
     plt.subplots_adjust(bottom=0.15)
@@ -369,6 +375,42 @@ def create_dynamic_neuron_visualization(model, device, normalize_input):
         valstep=1,
         valfmt='%d°'
     )
+    
+    # Configurazione del grafico cartesiano
+    cartesian_ax.set_xlim(-1.5, 1.5)
+    cartesian_ax.set_ylim(-1.5, 1.5)
+    cartesian_ax.set_aspect('equal')
+    cartesian_ax.grid(True, alpha=0.3)
+    cartesian_ax.set_title('Output IA: Punto (x,y)')
+    cartesian_ax.set_xlabel('X')
+    cartesian_ax.set_ylabel('Y')
+    
+    # Disegna il cerchio unitario come riferimento
+    circle = plt.Circle((0, 0), 1, fill=False, color='gray', linestyle='--', alpha=0.5)
+    cartesian_ax.add_patch(circle)
+    
+    # Aggiungi linee degli assi
+    cartesian_ax.axhline(y=0, color='k', linewidth=0.5, alpha=0.3)
+    cartesian_ax.axvline(x=0, color='k', linewidth=0.5, alpha=0.3)
+    
+    # Punto mobile per l'output della IA
+    ai_point, = cartesian_ax.plot([], [], 'ro', markersize=10, label='Output IA')
+    
+    # Punto di riferimento teorico (cos, sin dell'angolo)
+    theory_point, = cartesian_ax.plot([], [], 'bo', markersize=8, alpha=0.7, label='Teorico')
+    
+    # Linea che collega origine al punto IA
+    ai_line, = cartesian_ax.plot([], [], 'r-', alpha=0.5, linewidth=2)
+    
+    # Linea che collega origine al punto teorico
+    theory_line, = cartesian_ax.plot([], [], 'b-', alpha=0.5, linewidth=1)
+    
+    # Testo per mostrare i valori
+    value_text = cartesian_ax.text(0.02, 0.98, '', transform=cartesian_ax.transAxes, 
+                                  verticalalignment='top', fontsize=10,
+                                  bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    
+    cartesian_ax.legend(loc='lower right')
     
     # Inizializza i grafici a barre
     bars = []
@@ -393,13 +435,18 @@ def create_dynamic_neuron_visualization(model, device, normalize_input):
     # Funzione di aggiornamento per lo slider
     def update_visualization(val):
         angle = int(angle_slider.val)
+        angle_rad = np.radians(angle)
         
         with torch.no_grad():
             normalized_input = normalize_input(angle)
             input_tensor = torch.tensor([normalized_input], dtype=torch.float32).to(device)
             activations = model.get_activations(input_tensor)
+            
+            # Ottieni l'output del modello
+            output = model(input_tensor)
+            ai_x, ai_y = float(output[0][0]), float(output[0][1])
         
-        # Aggiorna ogni layer
+        # Aggiorna ogni layer delle attivazioni
         for i, layer_activations in enumerate(activations):
             layer_vals = layer_activations.flatten()
             
@@ -413,8 +460,29 @@ def create_dynamic_neuron_visualization(model, device, normalize_input):
                 y_max = float(layer_vals.max()) * 1.1
                 axes[i].set_ylim(y_min, y_max)
         
+        # Calcola i valori teorici
+        theory_x, theory_y = np.cos(angle_rad), np.sin(angle_rad)
+        
+        # Aggiorna il grafico cartesiano
+        ai_point.set_data([ai_x], [ai_y])
+        theory_point.set_data([theory_x], [theory_y])
+        
+        # Aggiorna le linee
+        ai_line.set_data([0, ai_x], [0, ai_y])
+        theory_line.set_data([0, theory_x], [0, theory_y])
+        
+        # Calcola l'errore
+        error = np.sqrt((ai_x - theory_x)**2 + (ai_y - theory_y)**2)
+        
+        # Aggiorna il testo informativo
+        info_text = f'Angolo: {angle}°\n'
+        info_text += f'IA: ({ai_x:.3f}, {ai_y:.3f})\n'
+        info_text += f'Teorico: ({theory_x:.3f}, {theory_y:.3f})\n'
+        info_text += f'Errore: {error:.3f}'
+        value_text.set_text(info_text)
+        
         # Aggiorna il titolo principale con l'angolo corrente
-        fig.suptitle(f'Attivazioni Neuroni - Angolo: {angle}°', fontsize=14, fontweight='bold')
+        fig.suptitle(f'Visualizzazione Dinamica IA - Angolo: {angle}°', fontsize=16, fontweight='bold')
         
         # Ridisegna la figura
         fig.canvas.draw()
